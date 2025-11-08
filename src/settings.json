@@ -1,0 +1,8 @@
+{
+  "autoSeed": true,
+  "defaultTheme": "light",
+  "cloudinary": {
+    "cloudName": "dv4pctxla",
+    "unsignedUploadPreset": "unsigned_preset"
+  }
+}

@@ -42,7 +42,7 @@ export default function App() {
     <div className="min-h-screen">
       <Navbar />
       <main className="max-w-6xl mx-auto p-6">
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+        <section className="grid grid-cols-1 gap-6 mb-6">
           <StatsCards stats={stats} />
         </section>
 

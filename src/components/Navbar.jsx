@@ -19,11 +19,11 @@ export default function Navbar(){
           <img src={logo} alt='logo' className='w-12 h-12 object-contain rounded-full' />
           <div className='text-xl font-bold'>MNR Dashboard</div>
         </div>
-        <div className='flex items-center gap-4'>
+        {/* <div className='flex items-center gap-4'>
           <button onClick={()=>setTheme(theme==='dark'?'light':'dark')} className='p-2 rounded bg-gray-100 dark:bg-gray-700'>
             {theme==='dark'? <Sun className='w-5 h-5'/> : <Moon className='w-5 h-5'/>}
           </button>
-        </div>
+        </div> */}
       </div>
     </header>
   )

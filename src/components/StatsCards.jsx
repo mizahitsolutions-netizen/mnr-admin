@@ -36,12 +36,14 @@ export default function StatsCards() {
       if (docSnap.exists()) {
         const newData = docSnap.data();
         setStats(newData);
+
         Object.keys(newData).forEach((key) => {
           if (typeof newData[key] === "number") {
             const prevValue = previousStats.current[key] ?? newData[key];
             animateValue(key, prevValue, newData[key]);
           }
         });
+
         previousStats.current = newData;
       }
     });
@@ -51,7 +53,7 @@ export default function StatsCards() {
   // open modal
   const handleAddClick = (field) => {
     setSelectedField(field);
-    setNewValue(stats[field] || 0); // show current value in input
+    setNewValue(stats[field] ?? 0); // show current value in input
     setShowModal(true);
   };
 
@@ -65,8 +67,7 @@ export default function StatsCards() {
         [selectedField]: Number(newValue),
       });
 
-      // ✅ Show success snackbar
-      const formattedName = selectedField.replace("_", " ");
+      const formattedName = selectedField.split("_").join(" ");
       setSnackbarMessage(`${formattedName} Updated`);
       setSnackbarSeverity("success");
       setSnackbarOpen(true);
@@ -85,23 +86,40 @@ export default function StatsCards() {
     <div className="card p-5 rounded-2xl shadow bg-white dark:bg-gray-800 relative transition-transform hover:scale-[1.02]">
       <div className="text-sm text-gray-500 dark:text-gray-300">{title}</div>
       <div className="text-3xl font-bold mt-2">{value ?? 0}</div>
-      <button
-        className="absolute top-3 right-3 bg-blue-500 hover:bg-blue-600 text-white text-xs px-2 py-1 rounded-md"
-        onClick={() => handleAddClick(field)}
-      >
-        + Add
-      </button>
+      {field && (
+        <button
+          className="absolute bottom-3 right-3 bg-blue-500 hover:bg-blue-600 text-white text-xs px-2 py-1 rounded-md"
+          onClick={() => handleAddClick(field)}
+        >
+          + Add
+        </button>
+      )}
     </div>
   );
 
   return (
     <>
-      {/* <div className="grid grid-cols-1 sm:grid-cols-3 gap-5"> */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5">
+        {/* Industrial & Commercial Projects */}
+        <StatCard
+          title="Industrial Projects"
+          value={displayStats.industrial_projects}
+          field="industrial_projects"
+        />
+        <StatCard
+          title="Commercial Projects"
+          value={displayStats.commercial_projects}
+          field="commercial_projects"
+        />
+
+        {/* Editable Total Projects */}
         <StatCard
           title="Total Projects"
           value={displayStats.total_projects}
           field="total_projects"
         />
+
+        {/* Clients & Experience */}
         <StatCard
           title="Total Clients"
           value={displayStats.total_clients}
@@ -112,14 +130,14 @@ export default function StatsCards() {
           value={displayStats.years_experience}
           field="years_experience"
         />
-      {/* </div> */}
+      </div>
 
       {/* Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white dark:bg-gray-900 p-6 rounded-2xl shadow-xl w-80">
             <h2 className="text-lg font-semibold mb-3 text-gray-700 dark:text-gray-200">
-              Edit {selectedField.replace("_", " ")}
+              Edit {selectedField.split("_").join(" ")}
             </h2>
             <div className="flex items-center justify-center space-x-3 mb-4">
               <button

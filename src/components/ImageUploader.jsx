@@ -1,5 +1,4 @@
 // Responsive ImageUploader with fully responsive dialog/snackbar behavior
-// Ensures inputs, grids, previews, and the Snackbar dialog scale properly on all devices
 
 import React, { useState } from "react";
 import { uploadToCloudinary } from "../cloudinary";
@@ -13,6 +12,7 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
+import { compressVideo } from "../utils/compressVideo";
 
 export default function ImageUploader({ onUploaded }) {
   const [name, setName] = useState("");
@@ -21,7 +21,7 @@ export default function ImageUploader({ onUploaded }) {
   const [description, setDescription] = useState("");
   const [progressStatus, setProgressStatus] = useState("");
   const [completionDate, setCompletionDate] = useState("");
-  const [files, setFiles] = useState([]);
+  const [files, setFiles] = useState([]); // original image/video files
   const [status, setStatus] = useState("");
   const [snackbar, setSnackbar] = useState({
     open: false,
@@ -29,6 +29,7 @@ export default function ImageUploader({ onUploaded }) {
     severity: "success",
   });
 
+  // ---- IMAGE COMPRESSION (same as before, used only during upload) ----
   const compressImage = (file, maxSizeKB = 500) => {
     return new Promise((resolve) => {
       const reader = new FileReader();
@@ -38,9 +39,8 @@ export default function ImageUploader({ onUploaded }) {
           const canvas = document.createElement("canvas");
           const ctx = canvas.getContext("2d");
 
-          // Basic scale factor based on size
           const scaleFactor = Math.sqrt((maxSizeKB * 1024) / file.size);
-          const finalScale = Math.min(1, scaleFactor); // avoid upscaling
+          const finalScale = Math.min(1, scaleFactor);
 
           canvas.width = img.width * finalScale;
           canvas.height = img.height * finalScale;
@@ -61,18 +61,13 @@ export default function ImageUploader({ onUploaded }) {
     });
   };
 
-  const handleFileChange = async (e) => {
+  // ---- STORE ORIGINAL FILES FOR PREVIEW ----
+  const handleFileChange = (e) => {
     const selectedFiles = Array.from(e.target.files || []);
-    const compressedFiles = [];
-
-    for (let file of selectedFiles) {
-      const compressed = await compressImage(file);
-      compressedFiles.push(compressed);
-    }
-
-    setFiles((prev) => [...prev, ...compressedFiles]);
+    setFiles((prev) => [...prev, ...selectedFiles]);
   };
 
+  // ---- UPLOAD WITH COMPRESSION ----
   const handleUpload = async (e) => {
     e.preventDefault();
 
@@ -81,18 +76,54 @@ export default function ImageUploader({ onUploaded }) {
       return;
     }
     if (!files.length) {
-      alert("Select at least one image");
+      alert("Select at least one file (image or video)");
       return;
     }
 
     try {
       setStatus("Uploading...");
+
       const imageUrls = [];
+      const videoUrls = [];
 
       for (let i = 0; i < files.length; i++) {
-        setStatus(`Uploading image ${i + 1} of ${files.length}...`);
-        const res = await uploadToCloudinary(files[i]);
-        imageUrls.push(res.secure_url || res.url);
+        const originalFile = files[i];
+        const isVideo = originalFile.type.startsWith("video/");
+        const isImage = originalFile.type.startsWith("image/");
+        let fileToUpload = originalFile;
+
+        setStatus(
+          `Uploading ${isVideo ? "video" : "image"} ${i + 1} of ${
+            files.length
+          }...`
+        );
+
+        try {
+          if (isImage) {
+            // compress all images
+            fileToUpload = await compressImage(originalFile);
+          } else if (isVideo) {
+            const sizeLimit = 100 * 1024 * 1024; // 100MB
+
+            if (originalFile.size > sizeLimit) {
+              // Only compress if >100MB
+              fileToUpload = await compressVideo(originalFile);
+            } else {
+              // Under 100MB → upload original
+              fileToUpload = originalFile;
+            }
+          }
+        } catch (error) {
+          console.error("Compression failed, using original file:", error);
+          fileToUpload = originalFile;
+        }
+
+        const resourceType = isVideo ? "video" : "image";
+        const res = await uploadToCloudinary(fileToUpload, resourceType);
+        const url = res.secure_url || res.url;
+
+        if (isVideo) videoUrls.push(url);
+        else imageUrls.push(url);
       }
 
       const projectData = {
@@ -101,6 +132,7 @@ export default function ImageUploader({ onUploaded }) {
         description: description.trim(),
         projectType,
         images: imageUrls,
+        videos: videoUrls,
         createdAt: new Date().toISOString(),
       };
 
@@ -217,31 +249,45 @@ export default function ImageUploader({ onUploaded }) {
         <input
           type="file"
           multiple
-          accept="image/*"
+          accept="image/*,video/*"
           onChange={handleFileChange}
           className="border p-2 rounded w-full"
         />
 
         {files.length > 0 && (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 mt-3">
-            {files.map((file, idx) => (
-              <div key={idx} className="relative group w-full">
-                <img
-                  src={URL.createObjectURL(file)}
-                  alt="preview"
-                  className="rounded-lg object-cover w-full h-24 sm:h-28 md:h-32 border"
-                />
-                <button
-                  type="button"
-                  onClick={() =>
-                    setFiles((prev) => prev.filter((_, i) => i !== idx))
-                  }
-                  className="absolute top-1 right-1 bg-red-600 text-white text-xs rounded-full px-1 opacity-0 group-hover:opacity-100 transition"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
+            {files.map((file, idx) => {
+              const isVideo = file.type.startsWith("video/");
+              const previewUrl = URL.createObjectURL(file);
+
+              return (
+                <div key={idx} className="relative group w-full">
+                  {isVideo ? (
+                    <video
+                      src={previewUrl}
+                      className="rounded-lg object-cover w-full h-24 sm:h-28 md:h-32 border"
+                      controls
+                    />
+                  ) : (
+                    <img
+                      src={previewUrl}
+                      alt="preview"
+                      className="rounded-lg object-cover w-full h-24 sm:h-28 md:h-32 border"
+                    />
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFiles((prev) => prev.filter((_, i) => i !== idx))
+                    }
+                    className="absolute top-1 right-1 bg-red-600 text-white text-xs rounded-full px-1 opacity-0 group-hover:opacity-100 transition"
+                  >
+                    ✕
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

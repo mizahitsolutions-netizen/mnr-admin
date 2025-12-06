@@ -11,6 +11,10 @@ import {
   Snackbar,
   Alert,
   IconButton,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from "@mui/material";
 import { ArrowBackIos, ArrowForwardIos } from "@mui/icons-material";
 
@@ -27,7 +31,7 @@ export default function ProjectsGrid({
     type: "success",
   });
   const [confirmDelete, setConfirmDelete] = useState(null);
-  const [currentImageIndex, setCurrentImageIndex] = useState({}); // stores per-project carousel index
+  const [currentImageIndex, setCurrentImageIndex] = useState({}); // per-project media index
 
   // 🔁 Sync projects when parent updates
   React.useEffect(() => setProjects(initialProjects || []), [initialProjects]);
@@ -79,60 +83,91 @@ export default function ProjectsGrid({
     }
   };
 
-  // ✅ Carousel Controls
+  // ✅ Carousel Controls (for mixed image + video)
   const nextImage = (projectId, total) => {
-    setCurrentImageIndex((prev) => ({
-      ...prev,
-      [projectId]: (prev[projectId] + 1) % total,
-    }));
+    setCurrentImageIndex((prev) => {
+      const current = prev[projectId] ?? 0;
+      return {
+        ...prev,
+        [projectId]: (current + 1) % total,
+      };
+    });
   };
 
   const prevImage = (projectId, total) => {
-    setCurrentImageIndex((prev) => ({
-      ...prev,
-      [projectId]: (prev[projectId] - 1 + total) % total,
-    }));
+    setCurrentImageIndex((prev) => {
+      const current = prev[projectId] ?? 0;
+      return {
+        ...prev,
+        [projectId]: (current - 1 + total) % total,
+      };
+    });
   };
 
   return (
     <div className="grid md:grid-cols-3 gap-6">
       {projects.map((p) => {
         const images = p.images || [];
-        const index = currentImageIndex[p.id] || 0;
+        const videos = p.videos || [];
+
+        // 🔗 Combine images + videos into one media array
+        const media = [
+          ...images.map((url) => ({ type: "image", url })),
+          ...videos.map((url) => ({ type: "video", url })),
+        ];
+
+        const totalMedia = media.length;
+        const index = currentImageIndex[p.id] ?? 0;
+        const activeMedia = media[index];
 
         return (
           <div
             key={p.id}
             className="rounded-xl overflow-hidden shadow-lg bg-white dark:bg-gray-800 relative"
           >
-            {/* ✅ Image Carousel */}
-            {images.length > 0 ? (
+            {/* ✅ Media Carousel (Image + Video) */}
+            {totalMedia > 0 ? (
               <div className="relative">
-                <img
-                  src={images[index]}
-                  alt={p.name}
-                  className="w-full h-48 object-cover transition-all duration-300"
-                />
-                {/* {images.length > 1 && (
+                {activeMedia.type === "image" ? (
+                  <img
+                    src={activeMedia.url}
+                    alt={p.name}
+                    className="w-full h-48 object-cover transition-all duration-300"
+                  />
+                ) : (
+                  <video
+                    src={activeMedia.url}
+                    className="w-full h-48 object-cover transition-all duration-300"
+                    controls
+                  />
+                )}
+
+                {/* Navigation arrows if more than 1 media */}
+                {totalMedia > 1 && (
                   <>
                     <IconButton
                       className="!absolute top-1/2 left-2 -translate-y-1/2 bg-white/70 hover:bg-white"
-                      onClick={() => prevImage(p.id, images.length)}
+                      onClick={() => prevImage(p.id, totalMedia)}
                     >
                       <ArrowBackIos fontSize="small" />
                     </IconButton>
                     <IconButton
                       className="!absolute top-1/2 right-2 -translate-y-1/2 bg-white/70 hover:bg-white"
-                      onClick={() => nextImage(p.id, images.length)}
+                      onClick={() => nextImage(p.id, totalMedia)}
                     >
                       <ArrowForwardIos fontSize="small" />
                     </IconButton>
+
+                    {/* Small indicator */}
+                    <div className="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded-full">
+                      {index + 1}/{totalMedia}
+                    </div>
                   </>
-                )} */}
+                )}
               </div>
             ) : (
               <div className="w-full h-44 flex items-center justify-center bg-gray-100 dark:bg-gray-700">
-                No image
+                No media
               </div>
             )}
 
@@ -140,6 +175,16 @@ export default function ProjectsGrid({
             <div className="p-4">
               <div className="font-semibold text-lg">{p.name}</div>
               <div className="text-sm text-gray-500 mb-1">{p.category}</div>
+
+              {/* Optional: show counts for images/videos */}
+              {(images.length > 0 || videos.length > 0) && (
+                <div className="text-xs text-gray-500 mb-1">
+                  {images.length > 0 && `${images.length} image(s)`}{" "}
+                  {images.length > 0 && videos.length > 0 && "•"}{" "}
+                  {videos.length > 0 && `${videos.length} video(s)`}
+                </div>
+              )}
+
               {p.description && (
                 <div className="text-sm text-gray-600 mb-2 line-clamp-3">
                   {p.description}
@@ -216,17 +261,23 @@ export default function ProjectsGrid({
                 rows={3}
                 fullWidth
               />
-              <TextField
-                label="Project Type"
-                value={editProject.projectType}
-                onChange={(e) =>
-                  setEditProject({
-                    ...editProject,
-                    projectType: e.target.value,
-                  })
-                }
-                fullWidth
-              />
+              <FormControl fullWidth>
+                <InputLabel id="project-type-label">Project Type</InputLabel>
+                <Select
+                  labelId="project-type-label"
+                  label="Project Type"
+                  value={editProject.projectType || "Ongoing"}
+                  onChange={(e) =>
+                    setEditProject({
+                      ...editProject,
+                      projectType: e.target.value,
+                    })
+                  }
+                >
+                  <MenuItem value="Ongoing">Ongoing</MenuItem>
+                  <MenuItem value="Completed">Completed</MenuItem>
+                </Select>
+              </FormControl>
               {editProject.projectType === "Ongoing" && (
                 <TextField
                   label="Progress Status"

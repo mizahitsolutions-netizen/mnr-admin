@@ -33,8 +33,10 @@ export default function ImageUploader({ onUploaded }) {
   const compressImage = (file, maxSizeKB = 500) => {
     return new Promise((resolve) => {
       const reader = new FileReader();
+
       reader.onload = (event) => {
         const img = new Image();
+
         img.onload = () => {
           const canvas = document.createElement("canvas");
           const ctx = canvas.getContext("2d");
@@ -49,14 +51,22 @@ export default function ImageUploader({ onUploaded }) {
 
           canvas.toBlob(
             (blob) => {
+              // ✅ Handle toBlob returning null (fallback to original file)
+              if (!blob) {
+                console.warn("toBlob returned null, using original file");
+                return resolve(file);
+              }
+
               resolve(new File([blob], file.name, { type: "image/jpeg" }));
             },
             "image/jpeg",
             0.7
           );
         };
+
         img.src = event.target.result;
       };
+
       reader.readAsDataURL(file);
     });
   };
@@ -88,8 +98,23 @@ export default function ImageUploader({ onUploaded }) {
 
       for (let i = 0; i < files.length; i++) {
         const originalFile = files[i];
+
         const isVideo = originalFile.type.startsWith("video/");
         const isImage = originalFile.type.startsWith("image/");
+
+        // ✅ Guard unsupported/unknown file types
+        if (!isImage && !isVideo) {
+          console.warn(
+            "Unsupported file type encountered:",
+            originalFile,
+            "type:",
+            originalFile.type
+          );
+          throw new Error(
+            "Unsupported file type detected. Please upload only images or videos."
+          );
+        }
+
         let fileToUpload = originalFile;
 
         setStatus(
@@ -119,7 +144,15 @@ export default function ImageUploader({ onUploaded }) {
         }
 
         const resourceType = isVideo ? "video" : "image";
+
         const res = await uploadToCloudinary(fileToUpload, resourceType);
+
+        // ✅ Defensive check on Cloudinary response
+        if (!res || (!res.secure_url && !res.url)) {
+          console.error("Invalid Cloudinary response:", res);
+          throw new Error("Upload failed: No URL returned from Cloudinary.");
+        }
+
         const url = res.secure_url || res.url;
 
         if (isVideo) videoUrls.push(url);
@@ -163,13 +196,19 @@ export default function ImageUploader({ onUploaded }) {
 
       onUploaded && onUploaded();
     } catch (err) {
-      console.error(err);
+      console.error("Upload failed:", err);
+
+      // ✅ Show more useful error info in status & snackbar
+      const message =
+        err?.message || "Upload failed due to an unexpected error.";
+
       setSnackbar({
         open: true,
-        message: "Upload failed. Try again!",
+        message,
         severity: "error",
       });
-      setStatus("Upload failed");
+
+      setStatus(`Upload failed: ${message}`);
     }
   };
 

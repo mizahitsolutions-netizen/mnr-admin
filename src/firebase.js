@@ -34,9 +34,9 @@ export async function autoSeedIfNeeded() {
       for (const p of sample) {
         await addDoc(collection(db, 'projects'), p);
       }
-      console.log('Firestore seeded with sample data.');
+      // console.log('Firestore seeded with sample data.');
     } else {
-      console.log('Firestore already seeded.');
+      // console.log('Firestore already seeded.');
     }
   } catch (err) {
     console.error('Auto-seed error:', err);

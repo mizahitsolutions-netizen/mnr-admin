@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { uploadToCloudinary } from "../cloudinary";
 import { db } from "../firebase";
-import { collection, addDoc } from "firebase/firestore";
+import { collection, addDoc, query, where, getDocs } from "firebase/firestore"; // ✅ extended imports
 import { Snackbar, Alert } from "@mui/material";
 import {
   Select,
@@ -13,12 +13,14 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 import { compressVideo } from "../utils/compressVideo";
+import slugify from "../utils/slugify";
 
 export default function ImageUploader({ onUploaded }) {
   const [name, setName] = useState("");
   const [category, setCategory] = useState("Residential");
   const [projectType, setProjectType] = useState("Ongoing");
   const [description, setDescription] = useState("");
+  const [location, setLocation] = useState("");
   const [progressStatus, setProgressStatus] = useState("");
   const [completionDate, setCompletionDate] = useState("");
   const [files, setFiles] = useState([]); // original image/video files
@@ -159,11 +161,30 @@ export default function ImageUploader({ onUploaded }) {
         else imageUrls.push(url);
       }
 
+      // ✅ Build base slug from name + category
+      const baseSlug = slugify(
+        `${name.trim()} - ${category.toLowerCase()} building`
+      );
+
+      let slug = baseSlug;
+      let counter = 1;
+
+      // 🔒 Ensure slug uniqueness (no timestamps, but -1, -2 if needed)
+      while (true) {
+        const q = query(collection(db, "projects"), where("slug", "==", slug));
+        const snap = await getDocs(q);
+        if (snap.empty) break;
+        slug = `${baseSlug}-${counter}`;
+        counter++;
+      }
+
       const projectData = {
         name: name.trim(),
+        slug,
         category,
         description: description.trim(),
         projectType,
+        address: location.trim(), // you’re saving it as `address` here
         images: imageUrls,
         videos: videoUrls,
         createdAt: new Date().toISOString(),
@@ -190,6 +211,7 @@ export default function ImageUploader({ onUploaded }) {
       setCategory("Residential");
       setProjectType("Ongoing");
       setDescription("");
+      setLocation("");
       setProgressStatus("");
       setCompletionDate("");
       setFiles([]);
@@ -198,7 +220,6 @@ export default function ImageUploader({ onUploaded }) {
     } catch (err) {
       console.error("Upload failed:", err);
 
-      // ✅ Show more useful error info in status & snackbar
       const message =
         err?.message || "Upload failed due to an unexpected error.";
 
@@ -253,6 +274,14 @@ export default function ImageUploader({ onUploaded }) {
         placeholder="Project description"
         className="border p-2 rounded w-full mt-4 min-h-[90px]"
       ></textarea>
+
+      {/* Location */}
+      <input
+        value={location}
+        onChange={(e) => setLocation(e.target.value)}
+        placeholder="Project location"
+        className="border p-2 rounded w-full mt-4"
+      />
 
       {/* Project Type + Progress/Completion */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">

@@ -1,9 +1,9 @@
-// Responsive ImageUploader with fully responsive dialog/snackbar behavior
+// Responsive ImageUploader with mobile-safe previews
 
 import React, { useState } from "react";
 import { uploadToCloudinary } from "../cloudinary";
 import { db } from "../firebase";
-import { collection, addDoc, query, where, getDocs } from "firebase/firestore"; // ✅ extended imports
+import { collection, addDoc, query, where, getDocs } from "firebase/firestore";
 import { Snackbar, Alert } from "@mui/material";
 import {
   Select,
@@ -23,74 +23,68 @@ export default function ImageUploader({ onUploaded }) {
   const [location, setLocation] = useState("");
   const [progressStatus, setProgressStatus] = useState("");
   const [completionDate, setCompletionDate] = useState("");
-  const [files, setFiles] = useState([]); // original image/video files
+
+  // ⬇️ files = [{ file, preview }]
+  const [files, setFiles] = useState([]);
   const [status, setStatus] = useState("");
+
   const [snackbar, setSnackbar] = useState({
     open: false,
     message: "",
     severity: "success",
   });
 
-  // ---- IMAGE COMPRESSION (same as before, used only during upload) ----
-  const compressImage = (file, maxSizeKB = 500) => {
-    return new Promise((resolve) => {
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+  // ---------- IMAGE COMPRESSION ----------
+  const compressImage = (file, maxSizeKB = 500) =>
+    new Promise((resolve) => {
       const reader = new FileReader();
-
-      reader.onload = (event) => {
+      reader.onload = (e) => {
         const img = new Image();
-
         img.onload = () => {
           const canvas = document.createElement("canvas");
           const ctx = canvas.getContext("2d");
 
-          const scaleFactor = Math.sqrt((maxSizeKB * 1024) / file.size);
-          const finalScale = Math.min(1, scaleFactor);
+          const scale = Math.min(1, Math.sqrt((maxSizeKB * 1024) / file.size));
 
-          canvas.width = img.width * finalScale;
-          canvas.height = img.height * finalScale;
+          canvas.width = img.width * scale;
+          canvas.height = img.height * scale;
 
           ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
           canvas.toBlob(
             (blob) => {
-              // ✅ Handle toBlob returning null (fallback to original file)
-              if (!blob) {
-                console.warn("toBlob returned null, using original file");
-                return resolve(file);
-              }
-
+              if (!blob) return resolve(file);
               resolve(new File([blob], file.name, { type: "image/jpeg" }));
             },
             "image/jpeg",
             0.7
           );
         };
-
-        img.src = event.target.result;
+        img.src = e.target.result;
       };
-
       reader.readAsDataURL(file);
     });
-  };
 
-  // ---- STORE ORIGINAL FILES FOR PREVIEW ----
+  // ---------- FILE SELECT ----------
   const handleFileChange = (e) => {
-    const selectedFiles = Array.from(e.target.files || []);
-    setFiles((prev) => [...prev, ...selectedFiles]);
+    const selected = Array.from(e.target.files || []);
+
+    const withPreview = selected.map((file) => ({
+      file,
+      preview: URL.createObjectURL(file),
+    }));
+
+    setFiles((prev) => [...prev, ...withPreview]);
   };
 
-  // ---- UPLOAD WITH COMPRESSION ----
+  // ---------- UPLOAD ----------
   const handleUpload = async (e) => {
     e.preventDefault();
 
-    if (!name.trim()) {
-      alert("Enter project name");
-      return;
-    }
-    if (!files.length) {
-      alert("Select at least one file (image or video)");
-      return;
-    }
+    if (!name.trim()) return alert("Enter project name");
+    if (!files.length) return alert("Select at least one file");
 
     try {
       setStatus("Uploading...");
@@ -99,25 +93,22 @@ export default function ImageUploader({ onUploaded }) {
       const videoUrls = [];
 
       for (let i = 0; i < files.length; i++) {
-        const originalFile = files[i];
+        const originalFile = files[i].file;
+        const type = originalFile.type.toLowerCase();
 
-        const isVideo = originalFile.type.startsWith("video/");
-        const isImage = originalFile.type.startsWith("image/");
-
-        // ✅ Guard unsupported/unknown file types
-        if (!isImage && !isVideo) {
-          console.warn(
-            "Unsupported file type encountered:",
-            originalFile,
-            "type:",
-            originalFile.type
-          );
+        // ❌ Block HEIC / HEIF
+        if (type.includes("heic") || type.includes("heif")) {
           throw new Error(
-            "Unsupported file type detected. Please upload only images or videos."
+            "HEIC images are not supported. Convert to JPG or PNG."
           );
         }
 
-        let fileToUpload = originalFile;
+        const isImage = type.startsWith("image/");
+        const isVideo = type.startsWith("video/");
+
+        if (!isImage && !isVideo) {
+          throw new Error("Unsupported file type");
+        }
 
         setStatus(
           `Uploading ${isVideo ? "video" : "image"} ${i + 1} of ${
@@ -125,43 +116,40 @@ export default function ImageUploader({ onUploaded }) {
           }...`
         );
 
-        try {
-          if (isImage) {
-            // compress all images
-            fileToUpload = await compressImage(originalFile);
-          } else if (isVideo) {
-            const sizeLimit = 100 * 1024 * 1024; // 100MB
+        let fileToUpload = originalFile;
 
-            if (originalFile.size > sizeLimit) {
-              // Only compress if >100MB
+        try {
+          if (isImage && !isMobile) {
+            fileToUpload = await compressImage(originalFile);
+          }
+
+          if (isVideo) {
+            const limit = 100 * 1024 * 1024;
+            if (originalFile.size > limit) {
+              if (isMobile) {
+                throw new Error(
+                  "Video too large for mobile upload (max 100MB)"
+                );
+              }
               fileToUpload = await compressVideo(originalFile);
-            } else {
-              // Under 100MB → upload original
-              fileToUpload = originalFile;
             }
           }
-        } catch (error) {
-          console.error("Compression failed, using original file:", error);
+        } catch {
           fileToUpload = originalFile;
         }
 
-        const resourceType = isVideo ? "video" : "image";
+        const res = await uploadToCloudinary(
+          fileToUpload,
+          isVideo ? "video" : "image"
+        );
 
-        const res = await uploadToCloudinary(fileToUpload, resourceType);
+        const url = res?.secure_url || res?.url;
+        if (!url) throw new Error("Upload failed");
 
-        // ✅ Defensive check on Cloudinary response
-        if (!res || (!res.secure_url && !res.url)) {
-          console.error("Invalid Cloudinary response:", res);
-          throw new Error("Upload failed: No URL returned from Cloudinary.");
-        }
-
-        const url = res.secure_url || res.url;
-
-        if (isVideo) videoUrls.push(url);
-        else imageUrls.push(url);
+        isVideo ? videoUrls.push(url) : imageUrls.push(url);
       }
 
-      // ✅ Build base slug from name + category
+      // ---------- SLUG ----------
       const baseSlug = slugify(
         `${name.trim()} - ${category.toLowerCase()} building`
       );
@@ -169,35 +157,28 @@ export default function ImageUploader({ onUploaded }) {
       let slug = baseSlug;
       let counter = 1;
 
-      // 🔒 Ensure slug uniqueness (no timestamps, but -1, -2 if needed)
       while (true) {
         const q = query(collection(db, "projects"), where("slug", "==", slug));
         const snap = await getDocs(q);
         if (snap.empty) break;
-        slug = `${baseSlug}-${counter}`;
-        counter++;
+        slug = `${baseSlug}-${counter++}`;
       }
 
-      const projectData = {
+      // ---------- FIRESTORE ----------
+      await addDoc(collection(db, "projects"), {
         name: name.trim(),
         slug,
         category,
         description: description.trim(),
         projectType,
-        address: location.trim(), // you’re saving it as `address` here
+        address: location.trim(),
         images: imageUrls,
         videos: videoUrls,
         createdAt: new Date().toISOString(),
-      };
-
-      if (projectType === "Ongoing") {
-        projectData.progressStatus = progressStatus || "Ongoing";
-      } else {
-        projectData.completionDate =
-          completionDate || new Date().toISOString().slice(0, 10);
-      }
-
-      await addDoc(collection(db, "projects"), projectData);
+        ...(projectType === "Ongoing"
+          ? { progressStatus: progressStatus || "Ongoing" }
+          : { completionDate }),
+      });
 
       setSnackbar({
         open: true,
@@ -205,8 +186,9 @@ export default function ImageUploader({ onUploaded }) {
         severity: "success",
       });
 
-      // Reset form
-      setStatus("");
+      // ---------- CLEANUP ----------
+      files.forEach((f) => URL.revokeObjectURL(f.preview));
+
       setName("");
       setCategory("Residential");
       setProjectType("Ongoing");
@@ -215,26 +197,17 @@ export default function ImageUploader({ onUploaded }) {
       setProgressStatus("");
       setCompletionDate("");
       setFiles([]);
+      setStatus("");
 
       onUploaded && onUploaded();
     } catch (err) {
-      console.error("Upload failed:", err);
-
-      const message =
-        err?.message || "Upload failed due to an unexpected error.";
-
+      setStatus(`Upload failed: ${err.message}`);
       setSnackbar({
         open: true,
-        message,
+        message: err.message,
         severity: "error",
       });
-
-      setStatus(`Upload failed: ${message}`);
     }
-  };
-
-  const handleCloseSnackbar = () => {
-    setSnackbar((prev) => ({ ...prev, open: false }));
   };
 
   return (
@@ -258,7 +231,7 @@ export default function ImageUploader({ onUploaded }) {
           <SelectTrigger className="border p-2 rounded w-full">
             <SelectValue placeholder="Select Category" />
           </SelectTrigger>
-          <SelectContent className="w-full">
+          <SelectContent>
             <SelectItem value="Residential">Residential</SelectItem>
             <SelectItem value="Commercial">Commercial</SelectItem>
             <SelectItem value="Villas">Villas</SelectItem>
@@ -267,15 +240,13 @@ export default function ImageUploader({ onUploaded }) {
         </Select>
       </div>
 
-      {/* Description */}
       <textarea
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         placeholder="Project description"
         className="border p-2 rounded w-full mt-4 min-h-[90px]"
-      ></textarea>
+      />
 
-      {/* Location */}
       <input
         value={location}
         onChange={(e) => setLocation(e.target.value)}
@@ -283,13 +254,12 @@ export default function ImageUploader({ onUploaded }) {
         className="border p-2 rounded w-full mt-4"
       />
 
-      {/* Project Type + Progress/Completion */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
         <Select value={projectType} onValueChange={setProjectType}>
           <SelectTrigger className="border p-2 rounded w-full">
-            <SelectValue placeholder="Select Project Type" />
+            <SelectValue placeholder="Project Type" />
           </SelectTrigger>
-          <SelectContent className="w-full">
+          <SelectContent>
             <SelectItem value="Ongoing">Ongoing</SelectItem>
             <SelectItem value="Completed">Completed</SelectItem>
           </SelectContent>
@@ -299,7 +269,7 @@ export default function ImageUploader({ onUploaded }) {
           <input
             value={progressStatus}
             onChange={(e) => setProgressStatus(e.target.value)}
-            placeholder="Progressing status"
+            placeholder="Progress status"
             className="border p-2 rounded w-full"
           />
         ) : (
@@ -312,82 +282,63 @@ export default function ImageUploader({ onUploaded }) {
         )}
       </div>
 
-      {/* File input + previews */}
-      <div className="mt-4 w-full">
-        <input
-          type="file"
-          multiple
-          accept="image/*,video/*"
-          onChange={handleFileChange}
-          className="border p-2 rounded w-full"
-        />
+      {/* FILE INPUT */}
+      <input
+        type="file"
+        multiple
+        accept="image/*,video/*"
+        onChange={handleFileChange}
+        className="border p-2 rounded w-full mt-4"
+      />
 
-        {files.length > 0 && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 mt-3">
-            {files.map((file, idx) => {
-              const isVideo = file.type.startsWith("video/");
-              const previewUrl = URL.createObjectURL(file);
+      {/* PREVIEWS */}
+      {files.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 mt-3">
+          {files.map(({ file, preview }, idx) => (
+            <div key={idx} className="relative group">
+              {file.type.startsWith("video/") ? (
+                <video
+                  src={preview}
+                  controls
+                  className="w-full h-28 object-cover rounded border"
+                />
+              ) : (
+                <img
+                  src={preview}
+                  className="w-full h-28 object-cover rounded border"
+                />
+              )}
 
-              return (
-                <div key={idx} className="relative group w-full">
-                  {isVideo ? (
-                    <video
-                      src={previewUrl}
-                      className="rounded-lg object-cover w-full h-24 sm:h-28 md:h-32 border"
-                      controls
-                    />
-                  ) : (
-                    <img
-                      src={previewUrl}
-                      alt="preview"
-                      className="rounded-lg object-cover w-full h-24 sm:h-28 md:h-32 border"
-                    />
-                  )}
+              <button
+                type="button"
+                onClick={() =>
+                  setFiles((prev) => {
+                    URL.revokeObjectURL(prev[idx].preview);
+                    return prev.filter((_, i) => i !== idx);
+                  })
+                }
+                className="absolute top-1 right-1 bg-red-600 text-white text-xs px-1 rounded-full opacity-0 group-hover:opacity-100"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setFiles((prev) => prev.filter((_, i) => i !== idx))
-                    }
-                    className="absolute top-1 right-1 bg-red-600 text-white text-xs rounded-full px-1 opacity-0 group-hover:opacity-100 transition"
-                  >
-                    ✕
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Upload Button + Status */}
-      <div className="mt-4 flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full">
-        <button
-          type="submit"
-          className="bg-orange-600 text-white px-4 py-2 rounded hover:bg-orange-700 w-full sm:w-auto text-center"
-        >
+      <div className="mt-4 flex flex-col sm:flex-row gap-4">
+        <button className="bg-orange-600 text-white px-4 py-2 rounded">
           Upload
         </button>
-        <div className="text-sm text-gray-500 break-words max-w-full">
-          {status}
-        </div>
+        <span className="text-sm text-gray-500">{status}</span>
       </div>
 
-      {/* RESPONSIVE SNACKBAR */}
       <Snackbar
         open={snackbar.open}
         autoHideDuration={4000}
-        onClose={handleCloseSnackbar}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-        sx={{ width: "100%", maxWidth: "100vw", px: 2 }}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
       >
-        <Alert
-          onClose={handleCloseSnackbar}
-          severity={snackbar.severity}
-          sx={{ width: "100%", maxWidth: "600px", mx: "auto" }}
-        >
-          {snackbar.message}
-        </Alert>
+        <Alert severity={snackbar.severity}>{snackbar.message}</Alert>
       </Snackbar>
     </form>
   );
